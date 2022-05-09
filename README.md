@@ -22,6 +22,7 @@ INTRO ---> contains a brief about the website.
 DNA Sequence ----> you can upload any DNA file and its analysis will be represented.
 Covid-Sequence-Analysis ----> in this page we used covid virus sequence and we analysed it.
 DotPlot ----> you can upload two DNA files and the will be aligned and give some data about the alignment such as alignment score and alignment plotting based on nulceotide number.
+About ---> contact info
 
 			
 		
