@@ -1,2 +1,3 @@
 # POMICS
- Genomics Student Project
+ This is a Genomics Student Project
+ 
