@@ -3,24 +3,28 @@ import matplotlib.pyplot as plt
 import matplotlib
 import io
 import pandas as pd
-from PIL import Image
-import subprocess
-import os
-import base64
+
 import pickle
-import nglview as nv
 import py3Dmol
+import sklearn
+from stmol import showmol
+
 matplotlib.use("Agg")
 from Bio.Seq import Seq
 from Bio import SeqIO
 from collections import Counter
-import neatbio.sequtils as utils
+# import neatbio.sequtils as utils
+from rdkit import Chem
+from rdkit.Chem import AllChem
+from rdkit.Chem import Descriptors
 import numpy as np
 from PIL import Image
 from Bio import pairwise2
 from Bio.pairwise2 import format_alignment
 from Bio.SeqUtils.ProtParam import ProteinAnalysis
-from Bio.PDB import PDBParser,MMCIFParser
+from Bio.PDB import *
+import os
+
 
 def delta(x, y):
     return 0 if x == y else 1
@@ -57,40 +61,104 @@ def dotplotx(seq1, seq2):
     # on y-axis list all sequences of seq 1
     yt = plt.yticks(np.arange(len(list(seq1))), list(seq1))
     plt.show()
+
+
 def FullName(seq):
-    dic={'A':'Alanine','R':'Arginine','N':'Asparagine','D':'Aspartic acid','C':'Cysteine','E':'Glutamic acid','Q':'Glutamine','G':'Glycine','H':'Histidine','I':'Isoleucine','L':'Leucine',
-         'K':'Lysine','M':'Methionine','F':'Phenylalanine','P':'Proline','S':'Serine','T':'Threonine','W':'Tryptophan','Y':'Tyrosine','V':'Valine','U':'Selenocysteine','O':'Pyrrolysine'}
+    dic = {'A': 'Alanine', 'R': 'Arginine', 'N': 'Asparagine', 'D': 'Aspartic acid', 'C': 'Cysteine',
+           'E': 'Glutamic acid', 'Q': 'Glutamine', 'G': 'Glycine', 'H': 'Histidine', 'I': 'Isoleucine', 'L': 'Leucine',
+           'K': 'Lysine', 'M': 'Methionine', 'F': 'Phenylalanine', 'P': 'Proline', 'S': 'Serine', 'T': 'Threonine',
+           'W': 'Tryptophan', 'Y': 'Tyrosine', 'V': 'Valine', 'U': 'Selenocysteine', 'O': 'Pyrrolysine'}
     aa_name = str(seq).replace("*", "")
     sperator = ","
     aa2_name = sperator.join(aa_name)
     list = aa2_name.split(',')
-    i=0
-    result=''
+    i = 0
+    result = ''
     for i in list:
         for key in dic.keys():
             if i == key:
-               result+=dic[key]+', '
+                result += dic[key] + ', '
     return result
+
+
+def makeblock(smi):
+    mol = Chem.MolFromSmiles(smi)
+    mol = Chem.AddHs(mol)
+    AllChem.EmbedMolecule(mol)
+    mblock = Chem.MolToMolBlock(mol)
+    return mblock
+
+
+def render_mol(xyz):
+    xyzview = py3Dmol.view(width=650, height=250)
+    xyzview.addModel(xyz, 'mol')
+    xyzview.setStyle({'stick': {}})
+    xyzview.setBackgroundColor('white')
+    xyzview.zoomTo()
+    showmol(xyzview, height=250, width=500)
+
+
+def AromaticProportion(m):
+    aromatic_atoms = [m.GetAtomWithIdx(i).GetIsAromatic() for i in range(m.GetNumAtoms())]
+    aa_count = []
+    for i in aromatic_atoms:
+        if i == True:
+            aa_count.append(1)
+    AromaticAtom = sum(aa_count)
+    HeavyAtom = Descriptors.HeavyAtomCount(m)
+    AR = AromaticAtom / HeavyAtom
+    return AR
+
+
+def generate(smiles, verbose=False):
+    moldata = []
+    for elem in smiles:
+        mol = Chem.MolFromSmiles(elem)
+        moldata.append(mol)
+    baseData = np.arange(1, 1)
+    i = 0
+    for mol in moldata:
+        desc_MolLogP = Descriptors.MolLogP(mol)
+        desc_MolWt = Descriptors.MolWt(mol)
+        desc_NumRotatableBonds = Descriptors.NumRotatableBonds(mol)
+        desc_AromaticProportion = AromaticProportion(mol)
+        row = np.array([desc_MolLogP,
+                        desc_MolWt,
+                        desc_NumRotatableBonds,
+                        desc_AromaticProportion])
+        if i == 0:
+            baseData = row
+        else:
+            baseData = np.vstack([baseData, row])
+        i = i + 1
+    columnNames = ["MolLogP", "MolWt", "NumRotatableBonds", "AromaticProportion"]
+    descriptors = pd.DataFrame(data=baseData, columns=columnNames)
+    return descriptors
 
 
 def main():
     """A Simple Streamlit App """
     st.title("POMICS")
 
-    activity = ['Intro','DNA Sequence','COVID-19 Protein Sequence Analysis', 'DotPlot', "About"]
+    activity = ['Intro', 'DNA Sequence','COVID-19 Protein Sequence Analysis',  'DotPlot',
+                'Molecular Prediction and visualization', "About"]
     choice = st.sidebar.selectbox("Select Activity", activity)
     if choice == 'Intro':
         st.header("Intro")
-        st.image('proteinsynthesis01.png')
-        st.subheader('What is POMICS ?!')
-        st.write('This Website converts DNA into its protein sequence , analyzes its data ')
 
+        st.image('proteinsynthesis01.png')
+        st.subheader("What is POMICS ?!")
+        st.write("POMICS is a protein sequence analysis tool that tak DNA file in the FASTA format .")
+        st.write(" This file will be transcripted and translated into "
+                 "its corresponding protein sequence , analyses it and represent"
+                 " data about this file using plotting and visualization ")
+        st.write("It also represent molecular solubility prediction and visualization using Machine Learning Model")
     elif choice == 'COVID-19 Protein Sequence Analysis':
         st.image('proteinsynthesis02.jpg')
-        ncov_dna_record = SeqIO.read("sequence.fasta","fasta")
+        ncov_dna_record = SeqIO.read("sequence.fasta", "fasta")
         ncov_dna = ncov_dna_record.seq
-        st.header("COVID SEQUENCE")
-        st.write(ncov_dna[0:800],)
+        st.subheader("COVID SEQUENCE")
+        st.write(ncov_dna[0:800], )
         st.subheader("Length of COVID seq:")
         st.write(len(ncov_dna))
         # Nucleotide Frequencies
@@ -126,34 +194,41 @@ def main():
         st.write(len(ncov_amino_acids))
         st.subheader('The largest 15 amino acid (Polypeptids) sequence')
         st.write(df['count'].nlargest(15))
-        st.write(df.nlargest(15,'count'))
+        st.write(df.nlargest(15, 'count'))
         st.subheader("Full Amino Acids Names")
-        res=FullName(ncov_protein)
+        res = FullName(ncov_protein)
         st.write(res[0:990])
         name = str(ncov_protein).replace("*", "")
-        c=Counter(str(name))
+        c = Counter(str(name))
         st.subheader("AA Frequancy")
         for key, value in c.items():
             st.write("{}: {}".format(key, value))
         plt.bar(c.keys(), c.values())
         st.set_option('deprecation.showPyplotGlobalUse', False)
         st.pyplot()
-        st.set_option('deprecation.showPyplotGlobalUse', False)
-        c1=c.most_common(1)
+        c1 = c.most_common(1)
         st.write("//Small Help :: Each amino acid with it's apreviation")
-        st.write("A = alanine, R=arginine, N = asparagine, D= aspartic acid, C =cysteine, E = glutamic acid, Q = glutamine, G = glycine, H = histidine, I = isoleucine, L = leucine, K = lysine, M = methionine, F = phenylalanine, P = proline, S = serine, T = threonine, W = tryptophan, Y = tyrosine,V = valine, U = selenocysteine, O = pyrrolysine")
+        st.write(
+            "A = alanine, R=arginine, N = asparagine, D= aspartic acid, C =cysteine, E = glutamic acid, Q = glutamine, G = glycine, H = histidine, I = isoleucine, L = leucine, K = lysine, M = methionine, F = phenylalanine, P = proline, S = serine, T = threonine, W = tryptophan, Y = tyrosine,V = valine, U = selenocysteine, O = pyrrolysine")
         st.subheader("Top Most Common Amino")
-        st.write(c1[0][0:2]," Leucine")
+        st.write(c1[0][0:2], " Leucine")
         # Chains in the Protein Structure
+        # parser = MMCIFParser()
+        # structure = parser.get_structure('6lu7','6lu7.cif')
+        # xyzview = py3Dmol.view(structure)
+        # xyzview.setStyle({'stick':{}})
+        # xyzview.setBackgroundColor('white')
+        # xyzview.zoomTo()
+        # showmol(xyzview, height=500, width=800)
 
     elif choice == "DNA Sequence":
-        st.header("DNA Sequence Analysis")
+        st.subheader("DNA Sequence Analysis")
         seq_file = st.file_uploader("Upload FASTA File", type=["fasta", "fa"])
         if seq_file is not None:
             byte_str = seq_file.read()
             text_obj = byte_str.decode('UTF-8')
-            dna_record = SeqIO.read(io.StringIO(text_obj),"fasta")
-            #st.write(dna_record)
+            dna_record = SeqIO.read(io.StringIO(text_obj), "fasta")
+            # st.write(dna_record)
             dna_seq = dna_record.seq
             details = st.radio("Details", ("Description", "Sequence"))
             if details == "Description":
@@ -185,7 +260,7 @@ def main():
             p1 = dna_seq.translate()
             p2 = str(p1).replace("*", "")
             aa_freq = Counter(str(p2))
-            
+
             if st.checkbox("Transcription"):
                 st.write(dna_seq.transcribe())
 
@@ -212,26 +287,27 @@ def main():
 
             elif st.checkbox("Plot AA Frequency"):
                 aa_color = st.color_picker("Pick An Amino Acid Color")
-                # barlist = plt.bar(aa_freq.keys(),aa_freq.values(),color=aa_color)
-                # barlist[2].set_color(aa_color)
                 plt.bar(aa_freq.keys(), aa_freq.values(), color=aa_color)
                 st.set_option('deprecation.showPyplotGlobalUse', False)
                 st.pyplot()
 
             elif st.checkbox(" Amino Acid Percent"):
                 st.write("//Small Help :: Each amino acid with it's apreviation")
-                st.write( "A = alanine, R=arginine, N = asparagine, D= aspartic acid, C =cysteine, E = glutamic acid, Q = glutamine, G = glycine, H = histidine, I = isoleucine, L = leucine, K = lysine, M = methionine, F = phenylalanine, P = proline, S = serine, T = threonine, W = tryptophan, Y = tyrosine,V = valine, U = selenocysteine, O = pyrrolysine")
+                st.write(
+                    "A = alanine, R=arginine, N = asparagine, D= aspartic acid, C =cysteine, E = glutamic acid, Q = glutamine, G = glycine, H = histidine, I = isoleucine, L = leucine, K = lysine, M = methionine, F = phenylalanine, P = proline, S = serine, T = threonine, W = tryptophan, Y = tyrosine,V = valine, U = selenocysteine, O = pyrrolysine")
                 p1_analysed = ProteinAnalysis(str(p1))
-                ac_count = st.text_input("Enter The Amino Acid You Want To Know It's Percentage Here","Write AMINO Abbreviation In Capital Letter")
+                ac_count = st.text_input("Enter The Amino Acid You Want To Know It's Percentage Here",
+                                         "Write AMINO Abbreviation In Capital Letter")
                 if ac_count in str(p1):
-                    st.write("Percent of {} Amino is :: {}".format((ac_count), p1_analysed.get_amino_acids_percent()[ac_count]))
-                elif ac_count == "Write AMINO Abbreviation In Capital Letter" :
+                    st.write("Percent of {} Amino is :: {}".format((ac_count),
+                                                                   p1_analysed.get_amino_acids_percent()[ac_count]))
+                elif ac_count == "Write AMINO Abbreviation In Capital Letter":
                     st.write('')
                 else:
                     st.write('this "{}" Amino Acide is not found in the sequence'.format(ac_count))
 
             elif st.checkbox("Top Most Common Amino"):
-                c =aa_freq.most_common(1)
+                c = aa_freq.most_common(1)
                 st.write(c[0][0:2])
 
     elif choice == "DotPlot":
@@ -253,7 +329,7 @@ def main():
             details = st.radio("Details", ("Description", "Sequence"))
             if details == "Description":
                 st.write(dna_record1.description)
-                st.write("lengh of seq1: ",len(dna_seq1))
+                st.write("lengh of seq1: ", len(dna_seq1))
                 st.write("=====================")
                 st.write(dna_record2.description)
                 st.write("lengh of seq2: ", len(dna_seq2))
@@ -262,7 +338,7 @@ def main():
                 st.write("=====================")
                 st.write(dna_record2.seq)
             st.subheader("Alignment Score")
-            seq1_n_seq2 = pairwise2.align.globalxx(dna_seq1, dna_seq2,one_alignment_only=True,score_only=True)
+            seq1_n_seq2 = pairwise2.align.globalxx(dna_seq1, dna_seq2, one_alignment_only=True, score_only=True)
             st.write(seq1_n_seq2)
             cus_limit = st.number_input("Select Max number of Nucleotide for dotplot", 10, 200, 30)
             if st.button("Dot Plot"):
@@ -270,19 +346,42 @@ def main():
                 dotplotx(dna_seq1[0:cus_limit], dna_seq2[0:cus_limit])
                 st.pyplot()
                 st.set_option('deprecation.showPyplotGlobalUse', False)
+    elif choice == 'Molecular Prediction and visualization':
+        image = Image.open('solubility-logo.jpg')
 
-    elif choice == "Drug design COVID-19":
-        st.write("ML")
+        st.image(image, use_column_width=True)
+        st.write("""
+                This  predicts the (LogS) values of molecules!
+                """)
+        compound_smiles = st.text_input('SMILES please', 'CC')
+        blk = makeblock(compound_smiles)
+        render_mol(blk)
+        st.write("""
+        # Molecular Prediction 
+        """)
 
+        st.subheader('User Input Features')
+        SMILES_input = "NCCCC\nCCC\nCN"
+
+        SMILES = st.text_area("SMILES input", SMILES_input)
+        SMILES = "C\n" + SMILES
+        SMILES = SMILES.split('\n')
+        st.header('Computed molecular descriptors')
+        X = generate(SMILES)
+        X[1:]
+        load_model = pickle.load(open('solubility_model.pkl', 'rb'))
+        # Apply model to make predictions
+        prediction = load_model.predict(X)
+        st.header('Predicted LogS values')
+        prediction[1:]
     elif choice == "About":
         st.subheader("About")
-        st.write("Contact us : ")
-        st.write("tasneemmohamed1811@gmail.com")
-        st.write(" iyomnaothman@gmail.com")
-        st.write(" nadin.ahmed.2023@gmail.com")
-        st.write(" fatmaragababdelaal@gmail.com")
-        st.write(" ameraelsa3id@gmail.com")
+        st.write("Contact us ")
+        st.write(" Tasneemmohamed1811@gmail.com")
+        st.write(" Nadin.Ahmed.2023@gmail.com")
+        st.write(" ameraalsa3id@gamail.com")
+        st.write(" iyomnaothman@gamil.com")
+        st.write(" fatmaragababdlaal@gamil.com")
 
 if __name__ == '__main__':
     main()
-
